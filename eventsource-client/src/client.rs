@@ -300,7 +300,6 @@ enum State {
         resp: ResponseFuture,
     },
     Connected(#[pin] hyper::Body),
-    InitializationError(Error),
     WaitingToReconnect(#[pin] Sleep),
     FollowingRedirect(Option<HeaderValue>),
     StreamClosed,
@@ -313,10 +312,6 @@ impl State {
             State::Connecting { retry: false, .. } => "connecting(no-retry)",
             State::Connecting { retry: true, .. } => "connecting(retry)",
             State::Connected(_) => "connected",
-            State::InitializationError(Error::StreamInitializationError) => {
-                "initializatoin-error(stream)"
-            }
-            State::InitializationError(_) => "initializatoin-error",
             State::WaitingToReconnect(_) => "waiting-to-reconnect",
             State::FollowingRedirect(_) => "following-redirect",
             State::StreamClosed => "closed",
@@ -455,7 +450,7 @@ where
 
             let state = this.state.project();
             match state {
-                StateProj::StreamClosed => return Poll::Ready(Some(Err(Error::StreamClosed))),
+                StateProj::StreamClosed => return Poll::Ready(None),
                 // New immediately transitions to Connecting, and exists only
                 // to ensure that we only connect when polled.
                 StateProj::New => {
@@ -523,10 +518,7 @@ where
                         }
 
                         if !*retry {
-                            self.as_mut()
-                                .project()
-                                .state
-                                .set(State::InitializationError(Error::StreamInitializationError));
+                            self.as_mut().project().state.set(State::StreamClosed);
                             return Poll::Ready(Some(Err(Error::StreamInitializationError)));
                         }
 
@@ -552,10 +544,7 @@ where
                         // This happens when the server is unreachable, e.g. connection refused.
                         warn!("request returned an error: {}", e);
                         if !*retry {
-                            self.as_mut()
-                                .project()
-                                .state
-                                .set(State::InitializationError(Error::StreamInitializationError));
+                            self.as_mut().project().state.set(State::StreamClosed);
                             return Poll::Ready(Some(Err(Error::StreamInitializationError)));
                         }
 
@@ -631,10 +620,6 @@ where
                     info!("Reconnecting");
                     self.as_mut().project().state.set(State::New);
                 }
-                StateProj::InitializationError(_) => {
-                    ready!(pin!(delay(Duration::from_secs(60), "errored")).poll(cx));
-                    return Poll::Ready(Some(Err(Error::StreamInitializationError)));
-                }
             };
         }
     }
@@ -707,12 +692,12 @@ mod tests {
 
     use crate::{
         client::{RequestProps, State},
-        Error, ReconnectOptionsBuilder, ReconnectingRequest,
+        ReconnectOptionsBuilder, ReconnectingRequest,
     };
 
     const INVALID_URI: &'static str = "http://mycrazyunexsistenturl.invaliddomainext";
 
-    #[test_case(INVALID_URI, false, |state| matches!(state, State::InitializationError(Error::StreamInitializationError)))]
+    #[test_case(INVALID_URI, false, |state| matches!(state, State::StreamClosed))]
     #[test_case(INVALID_URI, true, |state| matches!(state, State::WaitingToReconnect(_)))]
     #[tokio::test]
     async fn initial_connection(uri: &str, retry_initial: bool, expected: fn(&State) -> bool) {
@@ -764,7 +749,7 @@ mod tests {
         expected(&reconnecting_request.state);
     }
 
-    #[test_case(false, |state| matches!(state, State::InitializationError(Error::StreamInitializationError)))]
+    #[test_case(false, |state| matches!(state, State::StreamClosed))]
     #[test_case(true, |state| matches!(state, State::WaitingToReconnect(_)))]
     #[tokio::test]
     async fn initial_connection_mocked_server(retry_initial: bool, expected: fn(&State) -> bool) {
