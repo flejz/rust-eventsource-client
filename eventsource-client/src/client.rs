@@ -517,9 +517,14 @@ where
                             }
                         }
 
+                        let error = Error::UnexpectedResponse(
+                            Response::new(resp.status(), resp.headers().clone()),
+                            ErrorBody::new(resp.into_body()),
+                        );
+
                         if !*retry {
                             self.as_mut().project().state.set(State::StreamClosed);
-                            return Poll::Ready(Some(Err(Error::StreamInitializationError)));
+                            return Poll::Ready(Some(Err(error)));
                         }
 
                         self.as_mut().reset_redirects();
@@ -535,17 +540,14 @@ where
                             .state
                             .set(State::WaitingToReconnect(delay(duration, "retrying")));
 
-                        return Poll::Ready(Some(Err(Error::UnexpectedResponse(
-                            Response::new(resp.status(), resp.headers().clone()),
-                            ErrorBody::new(resp.into_body()),
-                        ))));
+                        return Poll::Ready(Some(Err(error)));
                     }
                     Err(e) => {
                         // This happens when the server is unreachable, e.g. connection refused.
                         warn!("request returned an error: {}", e);
                         if !*retry {
                             self.as_mut().project().state.set(State::StreamClosed);
-                            return Poll::Ready(Some(Err(Error::StreamInitializationError)));
+                            return Poll::Ready(Some(Err(Error::HttpStream(Box::new(e)))));
                         }
 
                         let duration = self
