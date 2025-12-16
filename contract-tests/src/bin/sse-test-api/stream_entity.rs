@@ -53,11 +53,6 @@ impl Inner {
                     if !self.send_message(failure, &client).await {
                         break;
                     }
-
-                    match e {
-                        es::Error::StreamClosed => break,
-                        _ => continue,
-                    }
                 }
             };
         }
