@@ -44,7 +44,7 @@ impl Inner {
                         break;
                     }
                 }
-                Ok(None) => continue,
+                Ok(None) => break,
                 Err(e) => {
                     let failure = EventType::Error {
                         error: format!("Error: {:?}", e),
