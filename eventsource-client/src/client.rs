@@ -748,7 +748,7 @@ mod tests {
             .await
             .ok();
 
-        expected(&reconnecting_request.state);
+        assert!(expected(&reconnecting_request.state));
     }
 
     #[test_case(false, |state| matches!(state, State::StreamClosed))]
